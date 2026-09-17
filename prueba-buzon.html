@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Buzón">
+<title>Prueba del buzón</title>
+<!--
+  Página temporal: comprueba si iOS comparte Cache Storage entre Safari y
+  una app web de la pantalla de inicio. De eso depende que un pago abierto
+  en Safari por el Atajo llegue a la PWA. Se borra al terminar la prueba.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 17px/1.4 -apple-system, system-ui, sans-serif;
+    margin: 0; padding: max(24px, env(safe-area-inset-top)) 16px 32px;
+    background: Canvas; color: CanvasText;
+  }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .modo { font-size: 20px; font-weight: 600; margin: 16px 0; }
+  button {
+    font: inherit; font-weight: 600; width: 100%; padding: 14px;
+    border: 0; border-radius: 12px; margin: 6px 0;
+    background: #0a84ff; color: #fff;
+  }
+  button.suave { background: rgba(127,127,127,.2); color: inherit; }
+  ul { padding-left: 20px; }
+  li { margin: 4px 0; }
+  .nota { opacity: .7; font-size: 15px; }
+</style>
+</head>
+<body>
+  <h1>Prueba del buzón</h1>
+  <div class="modo" id="modo"></div>
+
+  <button id="escribir">Dejar una nota aquí</button>
+  <button id="vaciar" class="suave">Vaciar</button>
+
+  <h2>Cache Storage</h2>
+  <ul id="cache"></ul>
+  <h2>localStorage</h2>
+  <ul id="local"></ul>
+
+  <p class="nota">Si una nota escrita en Safari sale en la app en
+  «Cache Storage», la opción B funciona. En «localStorage» no debería salir:
+  sirve de control.</p>
+
+<script>
+'use strict';
+
+const BUZON = 'buzon-prueba';
+const CLAVE = 'buzon-prueba';
+
+const enApp =
+  window.matchMedia('(display-mode: standalone)').matches ||
+  navigator.standalone === true;
+const modo = enApp ? 'app de la pantalla de inicio' : 'Safari';
+
+document.getElementById('modo').textContent = enApp
+  ? '📱 Estás en la app de la pantalla de inicio'
+  : '🧭 Estás en Safari';
+
+function pinta(ul, notas) {
+  ul.replaceChildren();
+  if (!notas.length) {
+    const li = document.createElement('li');
+    li.textContent = 'Vacío';
+    ul.append(li);
+    return;
+  }
+  for (const n of notas) {
+    const li = document.createElement('li');
+    li.textContent = `Desde ${n.modo} · ${new Date(n.hora).toLocaleTimeString('es-ES')}`;
+    ul.append(li);
+  }
+}
+
+async function leeCache() {
+  const cache = await caches.open(BUZON);
+  const peticiones = await cache.keys();
+  const notas = [];
+  for (const p of peticiones) {
+    const r = await cache.match(p);
+    notas.push(await r.json());
+  }
+  return notas.sort((a, b) => a.hora - b.hora);
+}
+
+function leeLocal() {
+  try { return JSON.parse(localStorage.getItem(CLAVE)) || []; }
+  catch { return []; }
+}
+
+async function refresca() {
+  try {
+    pinta(document.getElementById('cache'), await leeCache());
+  } catch (e) {
+    const ul = document.getElementById('cache');
+    ul.replaceChildren();
+    const li = document.createElement('li');
+    li.textContent = `Error: ${e.message}`;
+    ul.append(li);
+  }
+  pinta(document.getElementById('local'), leeLocal());
+}
+
+document.getElementById('escribir').addEventListener('click', async () => {
+  const nota = { modo, hora: Date.now() };
+  const cache = await caches.open(BUZON);
+  await cache.put(
+    new Request(`./__buzon/${nota.hora}`),
+    new Response(JSON.stringify(nota), { headers: { 'Content-Type': 'application/json' } })
+  );
+  try { localStorage.setItem(CLAVE, JSON.stringify([...leeLocal(), nota])); } catch {}
+  refresca();
+});
+
+document.getElementById('vaciar').addEventListener('click', async () => {
+  await caches.delete(BUZON);
+  try { localStorage.removeItem(CLAVE); } catch {}
+  refresca();
+});
+
+/* Al volver a la app desde el multitarea no se recarga: hay que releer */
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refresca();
+});
+
+refresca();
+</script>
+</body>
+</html>
